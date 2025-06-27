@@ -1,0 +1,24 @@
+steps:
+  # Build the container image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', 'gcr.io/melodic-now-463704-k1/saleor:latest', '.']
+
+  # Push the container image to Container Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'gcr.io/melodic-now-463704-k1/saleor:latest']
+
+  # Deploy container image to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+    - 'run'
+    - 'deploy'
+    - 'saleor-app'
+    - '--image=gcr.io/melodic-now-463704-k1/saleor:latest'
+    - '--region=us-central1'
+    - '--allow-unauthenticated'
+    - '--memory=2Gi'
+    - '--cpu=2'
+
+images:
+- 'gcr.io/melodic-now-463704-k1/saleor:latest'

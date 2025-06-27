@@ -1,0 +1,401 @@
+# Saleor Google Cloud Deployment Workflow
+# This GitHub Actions workflow automates deployment to Google Cloud Platform
+
+name: Deploy to Google Cloud
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - production
+
+env:
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  GAR_LOCATION: us-central1
+  REPOSITORY: saleor
+  SERVICE: saleor-app
+  REGION: us-central1
+
+jobs:
+  # Test job
+  test:
+    runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: saleor_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+      
+      redis:
+        image: redis:7
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: 2.1.1
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+
+      - name: Load cached venv
+        id: cached-poetry-dependencies
+        uses: actions/cache@v3
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('**/poetry.lock') }}
+
+      - name: Install dependencies
+        if: steps.cached-poetry-dependencies.outputs.cache-hit != 'true'
+        run: poetry install --no-interaction --no-root
+
+      - name: Install project
+        run: poetry install --no-interaction
+
+      - name: Run linting
+        run: |
+          poetry run ruff check .
+          poetry run ruff format --check .
+
+      - name: Run type checking
+        run: poetry run mypy saleor/
+
+      - name: Run security scan
+        run: poetry run semgrep scan --config .semgrep/ --exclude=.semgrep/ --error
+
+      - name: Run tests
+        env:
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/saleor_test
+          REDIS_URL: redis://localhost:6379/0
+          SECRET_KEY: test-secret-key
+          ALLOWED_HOSTS: localhost,127.0.0.1
+        run: poetry run pytest --maxfail=5 --tb=short
+
+  # Determine environment
+  environment:
+    runs-on: ubuntu-latest
+    outputs:
+      environment: ${{ steps.env.outputs.environment }}
+      is_production: ${{ steps.env.outputs.is_production }}
+    steps:
+      - name: Determine environment
+        id: env
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "environment=${{ github.event.inputs.environment }}" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.ref }}" == "refs/heads/main" ]] || [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            echo "environment=production" >> $GITHUB_OUTPUT
+          else
+            echo "environment=staging" >> $GITHUB_OUTPUT
+          fi
+          
+          if [[ "${{ github.ref }}" == "refs/heads/main" ]] || [[ "${{ github.ref }}" == refs/tags/v* ]] || [[ "${{ github.event.inputs.environment }}" == "production" ]]; then
+            echo "is_production=true" >> $GITHUB_OUTPUT
+          else
+            echo "is_production=false" >> $GITHUB_OUTPUT
+          fi
+
+  # Build and deploy
+  deploy:
+    needs: [test, environment]
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request'
+    environment: 
+      name: ${{ needs.environment.outputs.environment }}
+      url: ${{ steps.deploy.outputs.url }}
+
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          token_format: 'access_token'
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker ${{ env.GAR_LOCATION }}-docker.pkg.dev
+
+      - name: Set environment variables
+        run: |
+          if [[ "${{ needs.environment.outputs.environment }}" == "production" ]]; then
+            echo "SERVICE_SUFFIX=" >> $GITHUB_ENV
+            echo "IMAGE_TAG=${{ github.sha }}" >> $GITHUB_ENV
+          else
+            echo "SERVICE_SUFFIX=-staging" >> $GITHUB_ENV
+            echo "IMAGE_TAG=staging-${{ github.sha }}" >> $GITHUB_ENV
+          fi
+
+      - name: Build application image
+        run: |
+          docker build -f Dockerfile.cloudrun \
+            -t ${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/saleor:${{ env.IMAGE_TAG }} \
+            -t ${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/saleor:latest \
+            .
+
+      - name: Build worker image
+        run: |
+          docker build -f Dockerfile.worker \
+            -t ${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/saleor-worker:${{ env.IMAGE_TAG }} \
+            -t ${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/saleor-worker:latest \
+            .
+
+      - name: Push images to Artifact Registry
+        run: |
+          docker push ${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/saleor:${{ env.IMAGE_TAG }}
+          docker push ${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/saleor-worker:${{ env.IMAGE_TAG }}
+          
+          if [[ "${{ needs.environment.outputs.environment }}" == "production" ]]; then
+            docker push ${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/saleor:latest
+            docker push ${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/saleor-worker:latest
+          fi
+
+      - name: Run database migrations
+        run: |
+          MIGRATION_JOB="saleor-migration-$(date +%s)"
+          
+          # Get environment-specific values
+          if [[ "${{ needs.environment.outputs.environment }}" == "production" ]]; then
+            DATABASE_URL="${{ secrets.PROD_DATABASE_URL }}"
+            REDIS_URL="${{ secrets.PROD_REDIS_URL }}"
+            SECRET_KEY_SECRET="${{ secrets.PROD_SECRET_KEY_SECRET }}"
+            VPC_CONNECTOR="${{ secrets.PROD_VPC_CONNECTOR }}"
+            SERVICE_ACCOUNT="${{ secrets.PROD_SERVICE_ACCOUNT }}"
+          else
+            DATABASE_URL="${{ secrets.STAGING_DATABASE_URL }}"
+            REDIS_URL="${{ secrets.STAGING_REDIS_URL }}"
+            SECRET_KEY_SECRET="${{ secrets.STAGING_SECRET_KEY_SECRET }}"
+            VPC_CONNECTOR="${{ secrets.STAGING_VPC_CONNECTOR }}"
+            SERVICE_ACCOUNT="${{ secrets.STAGING_SERVICE_ACCOUNT }}"
+          fi
+          
+          gcloud run jobs create $MIGRATION_JOB \
+            --image=${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/saleor:${{ env.IMAGE_TAG }} \
+            --region=${{ env.REGION }} \
+            --memory=1Gi \
+            --cpu=1 \
+            --task-count=1 \
+            --parallelism=1 \
+            --command=python \
+            --args="manage.py,migrate" \
+            --vpc-connector=$VPC_CONNECTOR \
+            --service-account=$SERVICE_ACCOUNT \
+            --set-env-vars="DATABASE_URL=$DATABASE_URL,REDIS_URL=$REDIS_URL" \
+            --set-secrets="SECRET_KEY=$SECRET_KEY_SECRET:latest" \
+            --quiet
+          
+          gcloud run jobs execute $MIGRATION_JOB \
+            --region=${{ env.REGION }} \
+            --wait \
+            --quiet
+          
+          gcloud run jobs delete $MIGRATION_JOB \
+            --region=${{ env.REGION }} \
+            --quiet
+
+      - name: Deploy to Cloud Run
+        id: deploy
+        run: |
+          # Get environment-specific configuration
+          if [[ "${{ needs.environment.outputs.environment }}" == "production" ]]; then
+            PUBLIC_URL="${{ secrets.PROD_PUBLIC_URL }}"
+            ALLOWED_HOSTS="${{ secrets.PROD_ALLOWED_HOSTS }}"
+            ALLOWED_CLIENT_HOSTS="${{ secrets.PROD_ALLOWED_CLIENT_HOSTS }}"
+            DATABASE_URL="${{ secrets.PROD_DATABASE_URL }}"
+            REDIS_URL="${{ secrets.PROD_REDIS_URL }}"
+            EMAIL_URL="${{ secrets.PROD_EMAIL_URL }}"
+            STATIC_BUCKET="${{ secrets.PROD_STATIC_BUCKET }}"
+            MEDIA_BUCKET="${{ secrets.PROD_MEDIA_BUCKET }}"
+            PRIVATE_BUCKET="${{ secrets.PROD_PRIVATE_BUCKET }}"
+            SECRET_KEY_SECRET="${{ secrets.PROD_SECRET_KEY_SECRET }}"
+            VPC_CONNECTOR="${{ secrets.PROD_VPC_CONNECTOR }}"
+            SERVICE_ACCOUNT="${{ secrets.PROD_SERVICE_ACCOUNT }}"
+            MAX_INSTANCES="100"
+            PLAYGROUND_ENABLED="False"
+          else
+            PUBLIC_URL="${{ secrets.STAGING_PUBLIC_URL }}"
+            ALLOWED_HOSTS="${{ secrets.STAGING_ALLOWED_HOSTS }}"
+            ALLOWED_CLIENT_HOSTS="${{ secrets.STAGING_ALLOWED_CLIENT_HOSTS }}"
+            DATABASE_URL="${{ secrets.STAGING_DATABASE_URL }}"
+            REDIS_URL="${{ secrets.STAGING_REDIS_URL }}"
+            EMAIL_URL="${{ secrets.STAGING_EMAIL_URL }}"
+            STATIC_BUCKET="${{ secrets.STAGING_STATIC_BUCKET }}"
+            MEDIA_BUCKET="${{ secrets.STAGING_MEDIA_BUCKET }}"
+            PRIVATE_BUCKET="${{ secrets.STAGING_PRIVATE_BUCKET }}"
+            SECRET_KEY_SECRET="${{ secrets.STAGING_SECRET_KEY_SECRET }}"
+            VPC_CONNECTOR="${{ secrets.STAGING_VPC_CONNECTOR }}"
+            SERVICE_ACCOUNT="${{ secrets.STAGING_SERVICE_ACCOUNT }}"
+            MAX_INSTANCES="20"
+            PLAYGROUND_ENABLED="True"
+          fi
+          
+          gcloud run deploy ${{ env.SERVICE }}${{ env.SERVICE_SUFFIX }} \
+            --image=${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/saleor:${{ env.IMAGE_TAG }} \
+            --region=${{ env.REGION }} \
+            --platform=managed \
+            --allow-unauthenticated \
+            --memory=2Gi \
+            --cpu=2 \
+            --timeout=900 \
+            --max-instances=$MAX_INSTANCES \
+            --concurrency=200 \
+            --vpc-connector=$VPC_CONNECTOR \
+            --service-account=$SERVICE_ACCOUNT \
+            --set-env-vars="DATABASE_URL=$DATABASE_URL,REDIS_URL=$REDIS_URL,CELERY_BROKER_URL=$REDIS_URL,GS_PROJECT_ID=${{ env.PROJECT_ID }},GS_BUCKET_NAME=$STATIC_BUCKET,GS_MEDIA_BUCKET_NAME=$MEDIA_BUCKET,GS_MEDIA_PRIVATE_BUCKET_NAME=$PRIVATE_BUCKET,PUBLIC_URL=$PUBLIC_URL,ALLOWED_HOSTS=$ALLOWED_HOSTS,ALLOWED_CLIENT_HOSTS=$ALLOWED_CLIENT_HOSTS,EMAIL_URL=$EMAIL_URL,DEBUG=False,PLAYGROUND_ENABLED=$PLAYGROUND_ENABLED" \
+            --set-secrets="SECRET_KEY=$SECRET_KEY_SECRET:latest" \
+            --quiet
+          
+          # Get service URL
+          SERVICE_URL=$(gcloud run services describe ${{ env.SERVICE }}${{ env.SERVICE_SUFFIX }} \
+            --region=${{ env.REGION }} \
+            --format="value(status.url)")
+          
+          echo "url=$SERVICE_URL" >> $GITHUB_OUTPUT
+
+      - name: Update worker job
+        run: |
+          # Get environment-specific configuration
+          if [[ "${{ needs.environment.outputs.environment }}" == "production" ]]; then
+            DATABASE_URL="${{ secrets.PROD_DATABASE_URL }}"
+            REDIS_URL="${{ secrets.PROD_REDIS_URL }}"
+            STATIC_BUCKET="${{ secrets.PROD_STATIC_BUCKET }}"
+            MEDIA_BUCKET="${{ secrets.PROD_MEDIA_BUCKET }}"
+            PRIVATE_BUCKET="${{ secrets.PROD_PRIVATE_BUCKET }}"
+            SECRET_KEY_SECRET="${{ secrets.PROD_SECRET_KEY_SECRET }}"
+            VPC_CONNECTOR="${{ secrets.PROD_VPC_CONNECTOR }}"
+            SERVICE_ACCOUNT="${{ secrets.PROD_SERVICE_ACCOUNT }}"
+            WORKER_PARALLELISM="10"
+          else
+            DATABASE_URL="${{ secrets.STAGING_DATABASE_URL }}"
+            REDIS_URL="${{ secrets.STAGING_REDIS_URL }}"
+            STATIC_BUCKET="${{ secrets.STAGING_STATIC_BUCKET }}"
+            MEDIA_BUCKET="${{ secrets.STAGING_MEDIA_BUCKET }}"
+            PRIVATE_BUCKET="${{ secrets.STAGING_PRIVATE_BUCKET }}"
+            SECRET_KEY_SECRET="${{ secrets.STAGING_SECRET_KEY_SECRET }}"
+            VPC_CONNECTOR="${{ secrets.STAGING_VPC_CONNECTOR }}"
+            SERVICE_ACCOUNT="${{ secrets.STAGING_SERVICE_ACCOUNT }}"
+            WORKER_PARALLELISM="5"
+          fi
+          
+          WORKER_JOB_NAME="saleor-worker${{ env.SERVICE_SUFFIX }}"
+          
+          # Try to update existing job, create if it doesn't exist
+          gcloud run jobs replace $WORKER_JOB_NAME \
+            --image=${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/saleor-worker:${{ env.IMAGE_TAG }} \
+            --region=${{ env.REGION }} \
+            --memory=1Gi \
+            --cpu=1 \
+            --parallelism=$WORKER_PARALLELISM \
+            --vpc-connector=$VPC_CONNECTOR \
+            --service-account=$SERVICE_ACCOUNT \
+            --set-env-vars="DATABASE_URL=$DATABASE_URL,REDIS_URL=$REDIS_URL,CELERY_BROKER_URL=$REDIS_URL,GS_PROJECT_ID=${{ env.PROJECT_ID }},GS_BUCKET_NAME=$STATIC_BUCKET,GS_MEDIA_BUCKET_NAME=$MEDIA_BUCKET,GS_MEDIA_PRIVATE_BUCKET_NAME=$PRIVATE_BUCKET" \
+            --set-secrets="SECRET_KEY=$SECRET_KEY_SECRET:latest" \
+            --quiet || \
+          gcloud run jobs create $WORKER_JOB_NAME \
+            --image=${{ env.GAR_LOCATION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY }}/saleor-worker:${{ env.IMAGE_TAG }} \
+            --region=${{ env.REGION }} \
+            --memory=1Gi \
+            --cpu=1 \
+            --parallelism=$WORKER_PARALLELISM \
+            --vpc-connector=$VPC_CONNECTOR \
+            --service-account=$SERVICE_ACCOUNT \
+            --set-env-vars="DATABASE_URL=$DATABASE_URL,REDIS_URL=$REDIS_URL,CELERY_BROKER_URL=$REDIS_URL,GS_PROJECT_ID=${{ env.PROJECT_ID }},GS_BUCKET_NAME=$STATIC_BUCKET,GS_MEDIA_BUCKET_NAME=$MEDIA_BUCKET,GS_MEDIA_PRIVATE_BUCKET_NAME=$PRIVATE_BUCKET" \
+            --set-secrets="SECRET_KEY=$SECRET_KEY_SECRET:latest" \
+            --quiet
+
+      - name: Health check
+        run: |
+          max_attempts=10
+          attempt=0
+          
+          while [ $attempt -lt $max_attempts ]; do
+            if curl -f "${{ steps.deploy.outputs.url }}/health/" > /dev/null 2>&1; then
+              echo "Health check passed!"
+              exit 0
+            else
+              echo "Health check failed, attempt $((attempt + 1))/$max_attempts"
+              sleep 30
+              attempt=$((attempt + 1))
+            fi
+          done
+          
+          echo "Health check failed after $max_attempts attempts"
+          exit 1
+
+      - name: Create deployment summary
+        run: |
+          echo "## Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment**: ${{ needs.environment.outputs.environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Service URL**: ${{ steps.deploy.outputs.url }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Image Tag**: ${{ env.IMAGE_TAG }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Actor**: ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+
+  # Notify on deployment
+  notify:
+    needs: [deploy, environment]
+    runs-on: ubuntu-latest
+    if: always() && github.event_name != 'pull_request'
+    
+    steps:
+      - name: Notify deployment status
+        uses: 8398a7/action-slack@v3
+        if: always()
+        with:
+          status: ${{ needs.deploy.result }}
+          channel: '#deployments'
+          username: 'GitHub Actions'
+          icon_emoji: ':rocket:'
+          fields: repo,message,commit,author,action,eventName,ref,workflow
+          text: |
+            Saleor deployment to ${{ needs.environment.outputs.environment }} has ${{ needs.deploy.result }}
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
