@@ -1,0 +1,14 @@
+steps:
+  # Export the local image to a tar file
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['save', 'us-central1-docker.pkg.dev/melodic-now-463704-k1/saleor-demo/saleor:latest', '-o', '/workspace/saleor-image.tar']
+  
+  # Load and push the image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['load', '-i', '/workspace/saleor-image.tar']
+  
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'us-central1-docker.pkg.dev/melodic-now-463704-k1/saleor-demo/saleor:latest']
+
+images:
+- 'us-central1-docker.pkg.dev/melodic-now-463704-k1/saleor-demo/saleor:latest'

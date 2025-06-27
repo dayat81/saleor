@@ -4,10 +4,24 @@ Local development settings for Local Food backend.
 import os
 from pathlib import Path
 
-# Import base settings
-from .base import *
+# Set environment variables that base settings might need
+os.environ.setdefault("SECRET_KEY", "django-insecure-local-development-key-change-in-production")
+os.environ.setdefault("DEBUG", "True")
+os.environ.setdefault("ALLOWED_CLIENT_HOSTS", "localhost,127.0.0.1")
 
-# Build paths inside the project like this: BASE_DIR / 'subdir'.
+# Import all base settings directly by executing the settings.py file
+import importlib.util
+settings_path = Path(__file__).resolve().parent.parent / "settings.py"
+spec = importlib.util.spec_from_file_location("base_settings", settings_path)
+base_settings = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(base_settings)
+
+# Import all settings from the base module
+for name in dir(base_settings):
+    if name.isupper() and not name.startswith('_'):
+        globals()[name] = getattr(base_settings, name)
+
+# Override BASE_DIR for local development
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 # Enable local development mode
@@ -29,31 +43,8 @@ DATABASES = {
     }
 }
 
-# Add local food app and development tools
-INSTALLED_APPS = [
-    # Django apps
-    "django.contrib.admin",
-    "django.contrib.auth",
-    "django.contrib.contenttypes",
-    "django.contrib.sessions",
-    "django.contrib.messages",
-    "django.contrib.staticfiles",
-    
-    # Third party apps
-    "graphene_django",
-    "django_extensions",
-    
-    # Saleor core apps (minimal set for local development)
-    "saleor.core",
-    "saleor.account",
-    "saleor.channel",
-    "saleor.order",
-    "saleor.product",
-    "saleor.warehouse",
-    "saleor.permission",
-    "saleor.webhook",
-    
-    # Local Food app
+# Add local food app to existing INSTALLED_APPS
+INSTALLED_APPS = INSTALLED_APPS + [
     "saleor.localfood",
 ]
 
