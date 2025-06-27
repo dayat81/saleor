@@ -1,6 +1,114 @@
-.*
+# Saleor .dockerignore file
+# Excludes files and directories from Docker build context
+
+# Hidden files and directories (but keep .env for container builds)
+.git/
+.gitignore
+.gitattributes
+.github/
+.vscode/
+.idea/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.DS_Store
+Thumbs.db
+
+# Python bytecode and cache
 **/*.pyc
+**/__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Development databases
 *.sqlite
-media
-node_modules
-static
+*.sqlite3
+db.sqlite3
+db.sqlite3-journal
+
+# Generated files
+media/
+static/
+node_modules/
+locale/
+
+# Documentation and non-essential files
+*.md
+docs/
+README*
+LICENSE*
+CHANGELOG*
+*.txt
+
+# Development and testing
+.env.local
+.env.development
+.env.test
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+.hypothesis/
+nosetests.xml
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.bak
+*.swp
+*.swo
+*~
+
+# Infrastructure and deployment configs
+infrastructure/
+deployment/
+.gcloudignore
+cloudbuild.yaml
+skaffold.yaml
+docker-compose*.yml
+Dockerfile*
+
+# Editor and OS files
+*.sublime-*
+.vscode/
+.idea/
+.DS_Store
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+
+# Development tools
+webpack-stats.json
+webpack-bundle-tracker/
+cypress/videos/
+cypress/screenshots/
+storybook-static/
+
+# Local development overrides
+.env.override
+docker-compose.override.yml

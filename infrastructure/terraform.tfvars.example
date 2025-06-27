@@ -1,0 +1,62 @@
+# Example Terraform variables file for Saleor Google Cloud deployment
+# Copy this file to terraform.tfvars and customize the values
+
+# Required variables
+project_id         = "your-gcp-project-id"
+domain_name        = "api.yourdomain.com"
+public_url         = "https://api.yourdomain.com"
+django_secret_key  = "your-super-secret-django-key-here-change-this"
+db_password        = "your-secure-database-password"
+
+# Optional variables with recommended values
+region             = "us-central1"
+environment        = "production"
+
+# Application configuration
+allowed_hosts        = "api.yourdomain.com,yourdomain.com"
+allowed_client_hosts = "yourdomain.com,www.yourdomain.com,admin.yourdomain.com"
+
+# Email configuration (choose one)
+# Option 1: Console backend (for development)
+email_url = "console://"
+
+# Option 2: SMTP (Gmail example)
+# email_url = "smtp://your-email@gmail.com:your-app-password@smtp.gmail.com:587/?tls=True"
+
+# Option 3: SendGrid
+# sendgrid_api_key = "your-sendgrid-api-key"
+# email_url = "smtp://apikey:your-sendgrid-api-key@smtp.sendgrid.net:587/?tls=True"
+
+# Database configuration
+db_tier      = "db-custom-2-8192"  # 2 vCPU, 8GB RAM
+db_disk_size = 100                 # GB
+
+# Redis configuration
+redis_tier        = "STANDARD_HA"  # High availability
+redis_memory_size = 5              # GB
+
+# Cloud Run configuration
+min_instances = 1    # Keep at least 1 instance warm
+max_instances = 100  # Scale up to 100 instances
+
+# Environment-specific settings
+enable_debug_features = false  # Set to true for development
+enable_monitoring     = true
+enable_cdn           = true
+
+# Cost optimization
+preemptible_workers = false  # Set to true to reduce costs
+
+# Security
+enable_private_networking    = true
+enable_deletion_protection   = true
+
+# Backup configuration
+backup_retention_days = 30  # Production recommendation
+
+# Additional labels for resource organization
+additional_labels = {
+  team        = "backend"
+  cost_center = "engineering"
+  application = "saleor"
+}
