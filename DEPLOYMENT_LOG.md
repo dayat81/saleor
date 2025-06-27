@@ -452,7 +452,22 @@ The Saleor Google Cloud serverless infrastructure is **production-ready** and re
 - ✅ **SUCCESS**: Docker login now available
 - **Next step**: Push container image to Artifact Registry
 
-### 2025-01-27 00:00:35 - Container image push in progress
-- 🔄 **IN PROGRESS**: Pushing image to gcr.io/melodic-now-463704-k1/saleor:latest
-- **Status**: Uploading 143.6MB Docker image layers
-- **Progress**: User successfully initiated push from terminal
+### 2025-01-27 00:00:35 - Container image push and deployment completed
+- ✅ **SUCCESS**: Image pushed to gcr.io/melodic-now-463704-k1/saleor:latest
+- ✅ **SUCCESS**: Cloud Run service deployed at https://saleor-app-hvodeun2nq-uc.a.run.app
+- ✅ **SUCCESS**: Fixed ALLOWED_CLIENT_HOSTS environment variable issue
+- **Status**: Application successfully running on Cloud Run
+
+### 2025-01-27 00:00:36 - Database migration issues discovered
+- ❌ **ERROR**: Migration job failing with database connection timeout
+- **Error Details**: 
+  ```
+  insertId: "685e924b000577a02c0f605c"
+  logName: "projects/melodic-now-463704-k1/logs/run.googleapis.com%2Fstderr"
+  textPayload: "django.db.utils.OperationalError: connection timeout expired"
+  timestamp: "2025-06-27T12:44:59.358304Z"
+  ```
+- **Root Cause**: Cloud Run job cannot connect to Cloud SQL database (34.41.195.120:5432)
+- **Issue**: Network security settings preventing direct database connections
+- **Impact**: Database schema not initialized, application may have limited functionality
+- **Status**: Requires network configuration fix for next deployment

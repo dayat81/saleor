@@ -1,5 +1,2 @@
-"""
-Settings package for Saleor project.
-"""
-# Import base settings from main file
-from ..settings import *
+# Settings package for Saleor project
+# We don't import anything here to avoid circular imports
