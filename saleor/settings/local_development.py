@@ -9,17 +9,15 @@ os.environ.setdefault("SECRET_KEY", "django-insecure-local-development-key-chang
 os.environ.setdefault("DEBUG", "True")
 os.environ.setdefault("ALLOWED_CLIENT_HOSTS", "localhost,127.0.0.1")
 
-# Import all base settings directly by executing the settings.py file
-import importlib.util
-settings_path = Path(__file__).resolve().parent.parent / "settings.py"
-spec = importlib.util.spec_from_file_location("base_settings", settings_path)
-base_settings = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(base_settings)
+# Import Saleor's base settings using proper package imports
+# We need to temporarily modify sys.path to import the parent settings
+import sys
+saleor_path = Path(__file__).resolve().parent.parent
+if str(saleor_path) not in sys.path:
+    sys.path.insert(0, str(saleor_path.parent))
 
-# Import all settings from the base module
-for name in dir(base_settings):
-    if name.isupper() and not name.startswith('_'):
-        globals()[name] = getattr(base_settings, name)
+# Now import all settings from the main settings module
+from saleor.settings import *
 
 # Override BASE_DIR for local development
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
