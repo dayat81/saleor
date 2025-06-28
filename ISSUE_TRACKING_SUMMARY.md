@@ -11,7 +11,7 @@
 
 ---
 
-## Issue Summary: **14 Issues Identified**
+## Issue Summary: **15 Issues Identified**
 
 | # | Issue Type | Status | Severity | Resolution Time |
 |---|------------|--------|----------|----------------|
@@ -28,7 +28,8 @@
 | 11 | Network Authorization Issues | ✅ Resolved | Critical | 30 minutes |
 | 12 | Log Monitoring Setup | ✅ Resolved | Low | 1 hour |
 | 13 | RSA_PRIVATE_KEY Configuration | ✅ Resolved | Medium | 2 hours |
-| 14 | Cloud Run DATABASE_URL Missing | ✅ Resolved | Critical | 30 minutes |
+| 14 | Cloud Run DATABASE_URL Missing | ❌ Unresolved | Critical | Ongoing |
+| 15 | Hardcoded Database Configuration | ❌ Unresolved | Critical | Ongoing |
 
 **Legend**: ✅ Resolved | ⚠️ Workaround/Ongoing | ❌ Unresolved
 
@@ -36,7 +37,7 @@
 
 ## Detailed Issue Breakdown
 
-### 🔴 Critical Issues (Resolved: 3/3)
+### 🔴 Critical Issues (Resolved: 2/4)
 
 #### 1. Database Connection Timeout
 - **Timeline**: June 27 23:51 - June 28 07:12 (6h 21m)
@@ -51,12 +52,19 @@
 - **Root Cause**: Cloud SQL not accepting connections from Cloud Run public IPs
 - **Resolution**: Added `0.0.0.0/0` to authorized networks (temporary fix)
 
-#### 14. Cloud Run DATABASE_URL Missing ✅
-- **Timeline**: June 28 08:55 - 09:00 (5 minutes)
+#### 14. Cloud Run DATABASE_URL Missing ❌
+- **Timeline**: June 28 08:55 - 09:30 (35 minutes)
 - **Symptoms**: All database queries failing with `connection to server at "127.0.0.1", port 5432 failed`
-- **Root Cause**: Missing DATABASE_URL environment variable in Cloud Run service
-- **Resolution**: Added correct DATABASE_URL: `postgresql://saleor:Axwn5J0V6CJqF3e1@34.41.195.120:5432/saleor-db`
-- **Discovery Method**: Comprehensive API verification testing
+- **Root Cause**: Saleor container image ignores DATABASE_URL environment variable
+- **Status**: Environment variable properly set but application still connects to localhost
+- **Discovery Method**: Comprehensive API verification testing and environment variable troubleshooting
+
+#### 15. Hardcoded Database Configuration ❌
+- **Timeline**: June 28 09:15 - 09:30 (15 minutes)
+- **Symptoms**: Application ignores all database environment variables (DATABASE_URL, DB_HOST, etc.)
+- **Root Cause**: Container image has hardcoded database configuration pointing to localhost:5432
+- **Status**: **CRITICAL** - Requires Docker image rebuild or Django settings modification
+- **Impact**: Complete database connectivity failure despite correct environment configuration
 
 ### 🟠 High Severity Issues (Resolved: 3/3)
 
@@ -135,7 +143,7 @@
 
 ## Current Status & Next Steps
 
-### ✅ Successfully Resolved (13/14 issues)
+### ✅ Successfully Resolved (11/15 issues)
 1. Database Connection Timeout → Direct IP connection + authorized networks
 2. Missing Cloud SQL Permissions → Added IAM roles
 3. Incorrect Command Syntax → Fixed command arguments
@@ -148,18 +156,22 @@
 10. Connection Refused Errors → Direct IP with network authorization
 11. Network Authorization Issues → Added 0.0.0.0/0 to authorized networks
 12. RSA_PRIVATE_KEY Configuration → Generated and configured RSA key
-13. Cloud Run DATABASE_URL Missing → Added correct database connection string
 
-### ⚠️ Ongoing/Workarounds (1/14 issues)
+### ⚠️ Ongoing/Workarounds (1/15 issues)
 1. **Cloud SQL Proxy Configuration** - Using direct IP as permanent workaround
+
+### ❌ Unresolved Critical Issues (2/15 issues)
+1. **Cloud Run DATABASE_URL Missing** - Environment variable set but ignored by application
+2. **Hardcoded Database Configuration** - Container image requires rebuild with proper database configuration
 
 ### 🎯 Immediate Action Items
 1. ✅ ~~Generate and configure `RSA_PRIVATE_KEY` for JWT signing~~ **COMPLETED**
 2. ✅ ~~Complete migration execution with RSA key~~ **COMPLETED**
-3. ✅ ~~Fix DATABASE_URL configuration for Cloud Run~~ **COMPLETED**
-4. Consider VPC connector implementation for better security
-5. Migrate from 0.0.0.0/0 authorized networks to specific IP ranges
-6. Re-run comprehensive API verification to confirm all database queries working
+3. ❌ **CRITICAL**: Rebuild Docker image with proper database configuration that respects environment variables
+4. ❌ **CRITICAL**: Investigate Saleor Django settings to identify why DATABASE_URL is ignored
+5. Consider VPC connector implementation for better security (blocked by database issue)
+6. Migrate from 0.0.0.0/0 authorized networks to specific IP ranges (blocked by database issue)
+7. Re-run comprehensive API verification to confirm all database queries working (blocked by database issue)
 
 ---
 
@@ -168,16 +180,19 @@
 ### Business Impact
 - **RESOLVED**: Database migrations now completing → Deployment pipeline unblocked
 - **RESOLVED**: JWT configuration complete → Authentication system fully operational
-- **RESOLVED**: API endpoint fully functional → Ready for production use
+- **CRITICAL**: API endpoint NOT functional → Database connectivity completely blocked
+- **CRITICAL**: Application unusable → All database-dependent features failing
 - **Medium**: Using direct IP connection with 0.0.0.0/0 authorization → Security considerations
-- **Low**: Comprehensive verification identified and resolved final database connectivity issue
+- **High**: Comprehensive verification identified critical container image issue requiring rebuild
 
 ### Technical Debt
-- **Network Security**: Migrate from 0.0.0.0/0 to VPC connector for secure connectivity
+- **CRITICAL**: Container Image Rebuild - Fix hardcoded database configuration in Docker image
+- **CRITICAL**: Django Settings Investigation - Identify why DATABASE_URL is ignored
+- **Network Security**: Migrate from 0.0.0.0/0 to VPC connector for secure connectivity (blocked)
 - ~~**JWT Configuration**: Implement proper RSA key management with Secret Manager~~ **COMPLETED**
 - ~~**Environment Variables**: Centralize configuration management in Secret Manager~~ **COMPLETED**
-- **Error Handling**: Add better retry logic and connection pooling
-- **API Verification**: Implement regular automated testing of API endpoints
+- **Error Handling**: Add better retry logic and connection pooling (blocked)
+- **API Verification**: Implement regular automated testing of API endpoints (blocked)
 
 ### Lessons Learned
 1. **Cloud SQL Authorization** is critical - must configure authorized networks for public IP access
@@ -190,6 +205,8 @@
 8. **Comprehensive API verification** reveals issues not caught by basic deployment checks
 9. **Database URL configuration** must be explicitly set for Cloud Run services
 10. **RSA key management** requires proper base64 encoding for environment variables
+11. **Container Image Configuration** is fundamental - hardcoded settings override environment variables
+12. **Thorough Testing Required** - Environment variable configuration doesn't guarantee application compliance
 
 ---
 
@@ -197,15 +214,16 @@
 
 | Category | Time Spent | Outcome |
 |----------|------------|---------|
-| Database Connection Issues | 8 hours | Fully resolved with network authorization |
+| Database Connection Issues | 8 hours | Network connectivity resolved, application-level issue identified |
 | Permission Fixes | 30 minutes | Fully resolved |
 | Configuration Debugging | 4 hours | All Django config issues resolved |
 | Command Syntax Fixes | 30 minutes | Quick wins |
 | Environment Setup | 1.5 hours | Improved tooling and monitoring |
 | Documentation | 3 hours | Comprehensive tracking and monitoring |
 | Network Authorization | 30 minutes | Critical fix implemented |
-| API Verification & Database Fix | 1 hour | DATABASE_URL issue discovered and resolved |
-| **Total** | **18.5 hours** | **13/14 issues resolved** |
+| API Verification & Database Fix | 1.5 hours | Critical container image issue discovered |
+| Container Image Investigation | 30 minutes | Root cause identified - hardcoded database configuration |
+| **Total** | **19 hours** | **11/15 issues resolved, 2 critical issues require image rebuild** |
 
 ---
 
@@ -217,29 +235,30 @@
 - **Current DB IP**: 34.41.195.120:5432
 - **Monitoring**: [Google Cloud Console Logs](https://console.cloud.google.com/logs/viewer?project=melodic-now-463704-k1)
 
-**Last Updated**: June 28, 2025 - 09:05 WIB
+**Last Updated**: June 28, 2025 - 09:35 WIB
 
 ## Recent Execution Logs
-- 📋 [Current Error Fix Plan](./CURRENT_ERROR_FIX_PLAN.md) - Latest error analysis and solution strategy
-- 🔍 [Current Error Fix Execution Log](./CURRENT_ERROR_FIX_EXECUTION_LOG.md) - Real-time fix implementation with timestamps
+- 📋 [Database Fix Plan](./database-connectivity-fix-plan.md) - Latest database connectivity analysis and solution strategy
+- 🔍 [Database Fix Execution Log](./database-fix-execution-log.md) - Real-time fix implementation with timestamps
 - 🔍 [Saleor API Verification Log](./saleor-api-verification-log.md) - API testing results and verification
 
-## Final Deployment Success: June 28, 09:00 WIB
-✅ **Complete deployment success** - Saleor Cloud API fully operational
-✅ **All critical issues resolved** - Database connectivity and Django configuration working
-✅ **Comprehensive API verification completed** - Full 8-test verification suite executed
-✅ **Production deployment confirmed** - https://saleor-app-hvodeun2nq-uc.a.run.app/graphql/ fully functional
+## ❌ CRITICAL DEPLOYMENT ISSUE IDENTIFIED: June 28, 09:30 WIB
+🚨 **Database connectivity completely blocked** - Saleor Cloud API non-functional
+❌ **Critical container image issue** - Application ignores all environment variables
+❌ **Hardcoded database configuration** - Requires Docker image rebuild
+⚠️ **All database-dependent features failing** - API unusable for production
 
-### Latest API Verification Results (June 28, 08:55-09:00)
-- **GraphQL Endpoint**: ✅ Fully accessible and responding correctly
-- **Schema Introspection**: ✅ 1378 types, 311 mutations available
+### Latest Database Connectivity Investigation (June 28, 09:15-09:30)
+- **GraphQL Endpoint**: ✅ Accessible but returns database errors
+- **Schema Introspection**: ✅ 1378 types, 311 mutations available  
 - **Authentication**: ✅ Cloud Run IAM working properly
-- **Database Connectivity**: ✅ **FIXED** - Added missing DATABASE_URL environment variable
-- **Performance**: ✅ Average response time 1.118s
-- **Test Coverage**: 4/8 tests passed initially, **DATABASE_URL issue discovered and resolved**
+- **Environment Variables**: ✅ All properly configured (DATABASE_URL, DB_HOST, etc.)
+- **Database Connectivity**: ❌ **CRITICAL FAILURE** - Application ignores environment variables
+- **Performance**: ❌ All database queries fail with localhost connection attempts
+- **Test Coverage**: 0/8 database tests passing, **hardcoded configuration issue discovered**
 
-### Critical Discovery During Verification
-- **Issue**: Cloud Run service missing DATABASE_URL environment variable
-- **Impact**: All database-dependent queries failing
-- **Resolution**: Added `postgresql://saleor:Axwn5J0V6CJqF3e1@34.41.195.120:5432/saleor-db`
-- **Status**: **RESOLVED** - Service updated and working
+### Critical Discovery During Investigation
+- **Issue**: Saleor container image has hardcoded database configuration pointing to localhost:5432
+- **Impact**: Complete database connectivity failure despite correct environment configuration
+- **Root Cause**: Docker image ignores DATABASE_URL and all database environment variables
+- **Status**: **REQUIRES IMAGE REBUILD** - Environment variable approach exhausted
