@@ -70,6 +70,7 @@ steps:
           --command=python \
           --args="manage.py,migrate" \
           --vpc-connector=${_VPC_CONNECTOR} \
+          --add-cloudsql-instances=${_CLOUD_SQL_INSTANCE} \
           --set-env-vars="DATABASE_URL=${_DATABASE_URL},REDIS_URL=${_REDIS_URL},SECRET_KEY=${_SECRET_KEY}" \
           --service-account=${_SERVICE_ACCOUNT} \
           --quiet
@@ -106,6 +107,7 @@ steps:
       - '--max-instances=${_MAX_INSTANCES}'
       - '--concurrency=200'
       - '--vpc-connector=${_VPC_CONNECTOR}'
+      - '--add-cloudsql-instances=${_CLOUD_SQL_INSTANCE}'
       - '--service-account=${_SERVICE_ACCOUNT}'
       - '--set-env-vars=DATABASE_URL=${_DATABASE_URL},REDIS_URL=${_REDIS_URL},CELERY_BROKER_URL=${_REDIS_URL},GS_PROJECT_ID=$PROJECT_ID,GS_BUCKET_NAME=${_STATIC_BUCKET},GS_MEDIA_BUCKET_NAME=${_MEDIA_BUCKET},GS_MEDIA_PRIVATE_BUCKET_NAME=${_PRIVATE_BUCKET},PUBLIC_URL=${_PUBLIC_URL},ALLOWED_HOSTS=${_ALLOWED_HOSTS},ALLOWED_CLIENT_HOSTS=${_ALLOWED_CLIENT_HOSTS},EMAIL_URL=${_EMAIL_URL},DEBUG=False,PLAYGROUND_ENABLED=${_PLAYGROUND_ENABLED}'
       - '--set-secrets=SECRET_KEY=${_SECRET_KEY_SECRET}:latest'
@@ -130,6 +132,7 @@ steps:
           --cpu=1 \
           --parallelism=${_WORKER_PARALLELISM} \
           --vpc-connector=${_VPC_CONNECTOR} \
+          --add-cloudsql-instances=${_CLOUD_SQL_INSTANCE} \
           --service-account=${_SERVICE_ACCOUNT} \
           --set-env-vars="DATABASE_URL=${_DATABASE_URL},REDIS_URL=${_REDIS_URL},CELERY_BROKER_URL=${_REDIS_URL},GS_PROJECT_ID=$PROJECT_ID,GS_BUCKET_NAME=${_STATIC_BUCKET},GS_MEDIA_BUCKET_NAME=${_MEDIA_BUCKET},GS_MEDIA_PRIVATE_BUCKET_NAME=${_PRIVATE_BUCKET}" \
           --set-secrets="SECRET_KEY=${_SECRET_KEY_SECRET}:latest" \
@@ -191,9 +194,12 @@ substitutions:
   _EMAIL_URL: 'console://'
   _PLAYGROUND_ENABLED: 'False'
   
+  # Cloud SQL
+  _CLOUD_SQL_INSTANCE: 'melodic-now-463704-k1:us-central1:saleor-db-demo'
+  
   # Secrets (reference to Secret Manager)
   _SECRET_KEY_SECRET: 'saleor-django-secret-key'
-  _DATABASE_URL: 'postgresql://user:pass@host:5432/db'
+  _DATABASE_URL: 'postgresql://saleor:secure-db-password-123@/saleor?host=/cloudsql/melodic-now-463704-k1:us-central1:saleor-db-demo'
   _REDIS_URL: 'redis://host:6379/0'
 
 # Build timeout
