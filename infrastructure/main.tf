@@ -2,20 +2,6 @@
 # This Terraform configuration deploys Saleor on Google Cloud Platform
 # using serverless architecture with Cloud Run, Cloud SQL, and Cloud Memorystore
 
-terraform {
-  required_version = ">= 1.5"
-  required_providers {
-    google = {
-      source  = "hashicorp/google"
-      version = "~> 5.0"
-    }
-    google-beta = {
-      source  = "hashicorp/google-beta"
-      version = "~> 5.0"
-    }
-  }
-}
-
 # Configure the Google Cloud Provider
 provider "google" {
   project = var.project_id
