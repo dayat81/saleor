@@ -133,20 +133,56 @@ The infrastructure is fully deployed and operational with the following componen
 - Health checks for application services
 - Automated scheduling for background tasks
 
-## Deployment Notes
+## Application Deployment Status
 
-1. **Container Images:** The infrastructure is ready but requires container images to be built and pushed to the Artifact Registry
-2. **Domain Configuration:** SSL certificate is configured for `saleor-demo.example.com` - DNS needs to point to the load balancer IP
-3. **Database Initialization:** Database requires initial schema setup and data migration
-4. **Environment Variables:** All necessary environment variables are configured in the Cloud Run service
+### Container Image Status ✅
+- **Docker Image Built:** `saleor-production:latest` (Image ID: `bff918395293`)
+- **Pushed to Artifact Registry:** ✅ 
+  - Repository: `us-central1-docker.pkg.dev/melodic-now-463704-k1/saleor-33b5604e/saleor:latest`
+  - Digest: `sha256:24dc4394cac3a1cd64d9b6272703a201df69ff3d9e4f9fad9ce4bb888d94e4aa`
+  - Created: 2025-06-28T18:06:59
 
-## Next Steps for Full Deployment
+### Cloud Run Service Status ⚠️
+- **Service Name:** `saleor-app-33b5604e`
+- **Current Status:** Deployment in progress with startup issues
+- **Issue:** Container failing startup probe checks
+- **Error:** `Revision 'saleor-app-33b5604e-00001-kmq' is not ready and cannot serve traffic`
+- **Root Cause:** Application configuration or environment variable issues
+- **Logs:** Available via Google Cloud Console
 
-1. Build and push Saleor container images to Artifact Registry
-2. Configure DNS to point domain to load balancer IP (`34.8.212.5`)
-3. Run database migrations via Cloud Run job
-4. Deploy initial Saleor application configuration
-5. Test application functionality and performance
+### Configuration Updates Applied
+- **Telemetry Settings:** Added required `TELEMETRY_TRACER_CLASS` and `TELEMETRY_METER_CLASS`
+- **Instance Limits:** Reduced max instances from 10 to 5 due to quota restrictions
+- **Environment Variables:** All Saleor-required variables configured
+
+## Deployment Progress Summary
+
+✅ **Completed Steps:**
+1. Infrastructure fully deployed via Terraform
+2. Docker authentication configured
+3. Saleor application image built and optimized for Cloud Run
+4. Container image pushed to Artifact Registry
+5. Environment variables verified against Saleor requirements
+6. Telemetry configuration added
+7. Quota issues resolved (max instances reduced to 5)
+
+⚠️ **In Progress:**
+- Cloud Run service deployment (container startup troubleshooting)
+
+❌ **Pending:**
+1. Resolve container startup issues
+2. Database migrations and initial setup
+3. Configure DNS to point domain to load balancer IP (`34.8.212.5`)
+4. SSL certificate provisioning (awaiting DNS configuration)
+5. Application functionality testing
+
+## Current Issues
+
+### Primary Issue: Container Startup Failure
+- **Problem:** Cloud Run container fails startup probe checks on `/health/` endpoint
+- **Symptoms:** HTTP probe timeout, connection failed
+- **Investigation:** Application may require additional environment variables or initialization steps
+- **Next Steps:** Review Saleor startup requirements and container health check configuration
 
 ## Cost Optimization Notes
 
@@ -157,6 +193,9 @@ The infrastructure is fully deployed and operational with the following componen
 
 ---
 
-**Status:** ✅ Infrastructure Fully Deployed and Ready  
+**Status:** ⚠️ Infrastructure Deployed, Application Deployment In Progress  
 **Terraform State:** Synchronized and up-to-date  
-**Last Terraform Apply:** 2025-06-28
+**Last Terraform Apply:** 2025-06-28  
+**Last Docker Build:** 2025-06-28 09:49:00 UTC  
+**Container Image:** Available in Artifact Registry  
+**Next Action:** Resolve Cloud Run container startup issues

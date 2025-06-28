@@ -61,10 +61,10 @@ WORKDIR /app
 # Set file ownership
 RUN chown -R saleor:saleor /app
 
-# Collect static files
-ARG STATIC_URL
-ENV STATIC_URL=${STATIC_URL:-/static/}
-RUN SECRET_KEY=dummy STATIC_URL=${STATIC_URL} python3 manage.py collectstatic --no-input
+# Skip collectstatic for now - will handle in Cloud Run
+# ARG STATIC_URL
+# ENV STATIC_URL=${STATIC_URL:-/static/}
+# RUN SECRET_KEY=dummy STATIC_URL=${STATIC_URL} python3 manage.py collectstatic --no-input
 
 # Cloud Run specific environment variables
 ENV PORT=8000

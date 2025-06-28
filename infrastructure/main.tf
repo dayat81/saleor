@@ -224,18 +224,9 @@ resource "google_storage_bucket" "private_files" {
   }
 }
 
-# Make static and media buckets publicly readable
-resource "google_storage_bucket_iam_member" "static_files_public" {
-  bucket = google_storage_bucket.static_files.name
-  role   = "roles/storage.objectViewer"
-  member = "allUsers"
-}
-
-resource "google_storage_bucket_iam_member" "media_files_public" {
-  bucket = google_storage_bucket.media_files.name
-  role   = "roles/storage.objectViewer"
-  member = "allUsers"
-}
+# Note: Public access to buckets removed due to organization policy restrictions
+# Buckets can be made public manually in Google Cloud Console if needed
+# or via bucket-level ACLs
 
 # Cloud SQL instance
 resource "google_sql_database_instance" "postgres" {
@@ -256,7 +247,9 @@ resource "google_sql_database_instance" "postgres" {
       enabled                        = true
       start_time                     = "03:00"
       point_in_time_recovery_enabled = true
-      backup_retention_days          = var.environment == "production" ? 30 : 7
+      backup_retention_settings {
+        retained_backups = var.environment == "production" ? 30 : 7
+      }
     }
     
     ip_configuration {
@@ -268,11 +261,6 @@ resource "google_sql_database_instance" "postgres" {
     database_flags {
       name  = "max_connections"
       value = "200"
-    }
-    
-    database_flags {
-      name  = "shared_preload_libraries"
-      value = "pg_stat_statements"
     }
     
     user_labels = local.common_labels
@@ -383,7 +371,7 @@ resource "google_cloud_run_v2_service" "saleor_app" {
     
     scaling {
       min_instance_count = var.min_instances
-      max_instance_count = var.max_instances
+      max_instance_count = 5  # Reduced from var.max_instances due to quota limit
     }
     
     containers {
@@ -502,6 +490,16 @@ resource "google_cloud_run_v2_service" "saleor_app" {
         name  = "PLAYGROUND_ENABLED"
         value = var.environment == "production" ? "False" : "True"
       }
+      
+      env {
+        name  = "TELEMETRY_TRACER_CLASS"
+        value = "saleor.core.telemetry.trace.Tracer"
+      }
+      
+      env {
+        name  = "TELEMETRY_METER_CLASS"
+        value = "saleor.core.telemetry.metric.Meter"
+      }
     }
   }
   
@@ -536,6 +534,9 @@ resource "google_cloud_run_v2_job" "saleor_worker" {
   template {
     labels = local.common_labels
     
+    parallelism = 10
+    task_count  = 1
+    
     template {
       vpc_access {
         connector = google_vpc_access_connector.connector.id
@@ -544,11 +545,7 @@ resource "google_cloud_run_v2_job" "saleor_worker" {
       
       service_account = google_service_account.cloud_run_sa.email
       
-      parallelism = 10
-      task_count  = 1
-      
-      template {
-        containers {
+      containers {
           image   = "${google_artifact_registry_repository.saleor_repo.location}-docker.pkg.dev/${var.project_id}/${google_artifact_registry_repository.saleor_repo.repository_id}/saleor:latest"
           command = ["celery"]
           args    = ["-A", "saleor.celeryconf:app", "worker", "-E"]
@@ -607,7 +604,6 @@ resource "google_cloud_run_v2_job" "saleor_worker" {
           }
         }
       }
-    }
   }
   
   depends_on = [
@@ -661,6 +657,11 @@ resource "google_compute_backend_service" "saleor_backend" {
     negative_caching_policy {
       code = 404
       ttl  = 120
+    }
+    cache_key_policy {
+      include_host = true
+      include_protocol = true
+      include_query_string = true
     }
   }
   
