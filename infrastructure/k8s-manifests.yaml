@@ -1,0 +1,324 @@
+---
+# Namespace for Saleor application
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: saleor
+  labels:
+    name: saleor
+
+---
+# ServiceAccount for Saleor with Workload Identity
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: saleor-app
+  namespace: saleor
+  annotations:
+    iam.gke.io/gcp-service-account: "saleor-workload-SUFFIX@PROJECT_ID.iam.gserviceaccount.com"
+
+---
+# Secret for environment variables
+apiVersion: v1
+kind: Secret
+metadata:
+  name: saleor-secrets
+  namespace: saleor
+type: Opaque
+stringData:
+  DATABASE_URL: "postgresql://saleor:PASSWORD@DB_HOST:5432/saleor"
+  REDIS_URL: "redis://REDIS_HOST:6379/0"
+  CELERY_BROKER_URL: "redis://REDIS_HOST:6379/0"
+
+---
+# ConfigMap for environment variables
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: saleor-config
+  namespace: saleor
+data:
+  DEBUG: "False"
+  ALLOWED_HOSTS: "*"
+  ALLOWED_CLIENT_HOSTS: "*"
+  PUBLIC_URL: "https://DOMAIN_NAME"
+  GS_PROJECT_ID: "PROJECT_ID"
+  GS_BUCKET_NAME: "STATIC_BUCKET"
+  GS_MEDIA_BUCKET_NAME: "MEDIA_BUCKET"
+  GS_MEDIA_PRIVATE_BUCKET_NAME: "PRIVATE_BUCKET"
+  EMAIL_URL: "console://"
+  ENABLE_DEBUG_TOOLBAR: "False"
+  PLAYGROUND_ENABLED: "True"
+  TELEMETRY_TRACER_CLASS: "saleor.core.telemetry.trace.Tracer"
+  TELEMETRY_METER_CLASS: "saleor.core.telemetry.metric.Meter"
+
+---
+# Deployment for Saleor main application
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: saleor-app
+  namespace: saleor
+  labels:
+    app: saleor-app
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: saleor-app
+  template:
+    metadata:
+      labels:
+        app: saleor-app
+    spec:
+      serviceAccountName: saleor-app
+      containers:
+      - name: saleor
+        image: REGION-docker.pkg.dev/PROJECT_ID/saleor-SUFFIX/saleor:latest
+        ports:
+        - containerPort: 8000
+          name: http
+        env:
+        - name: SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: saleor-django-secret-key-SUFFIX
+              key: latest
+        envFrom:
+        - configMapRef:
+            name: saleor-config
+        - secretRef:
+            name: saleor-secrets
+        resources:
+          requests:
+            cpu: 500m
+            memory: 1Gi
+          limits:
+            cpu: 2
+            memory: 2Gi
+        livenessProbe:
+          httpGet:
+            path: /health/
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health/
+            port: 8000
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 10
+          failureThreshold: 3
+        startupProbe:
+          httpGet:
+            path: /health/
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 10
+          failureThreshold: 3
+
+---
+# Service for Saleor application
+apiVersion: v1
+kind: Service
+metadata:
+  name: saleor-app-service
+  namespace: saleor
+  labels:
+    app: saleor-app
+spec:
+  selector:
+    app: saleor-app
+  ports:
+  - port: 80
+    targetPort: 8000
+    protocol: TCP
+    name: http
+  type: ClusterIP
+
+---
+# Deployment for Celery workers
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: saleor-worker
+  namespace: saleor
+  labels:
+    app: saleor-worker
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: saleor-worker
+  template:
+    metadata:
+      labels:
+        app: saleor-worker
+    spec:
+      serviceAccountName: saleor-app
+      containers:
+      - name: celery-worker
+        image: REGION-docker.pkg.dev/PROJECT_ID/saleor-SUFFIX/saleor:latest
+        command: ["celery"]
+        args: ["-A", "saleor.celeryconf:app", "worker", "-E"]
+        env:
+        - name: SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: saleor-django-secret-key-SUFFIX
+              key: latest
+        envFrom:
+        - configMapRef:
+            name: saleor-config
+        - secretRef:
+            name: saleor-secrets
+        resources:
+          requests:
+            cpu: 250m
+            memory: 512Mi
+          limits:
+            cpu: 1
+            memory: 1Gi
+
+---
+# Deployment for Celery Beat scheduler
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: saleor-beat
+  namespace: saleor
+  labels:
+    app: saleor-beat
+spec:
+  replicas: 1  # Only one instance needed for scheduler
+  selector:
+    matchLabels:
+      app: saleor-beat
+  template:
+    metadata:
+      labels:
+        app: saleor-beat
+    spec:
+      serviceAccountName: saleor-app
+      containers:
+      - name: celery-beat
+        image: REGION-docker.pkg.dev/PROJECT_ID/saleor-SUFFIX/saleor:latest
+        command: ["celery"]
+        args: ["-A", "saleor.celeryconf:app", "beat", "-l", "info"]
+        env:
+        - name: SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: saleor-django-secret-key-SUFFIX
+              key: latest
+        envFrom:
+        - configMapRef:
+            name: saleor-config
+        - secretRef:
+            name: saleor-secrets
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+
+---
+# Job for database migrations
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: saleor-migrate
+  namespace: saleor
+  labels:
+    app: saleor-migrate
+spec:
+  template:
+    spec:
+      serviceAccountName: saleor-app
+      restartPolicy: OnFailure
+      containers:
+      - name: migrate
+        image: REGION-docker.pkg.dev/PROJECT_ID/saleor-SUFFIX/saleor:latest
+        command: ["python"]
+        args: ["manage.py", "migrate"]
+        env:
+        - name: SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: saleor-django-secret-key-SUFFIX
+              key: latest
+        envFrom:
+        - configMapRef:
+            name: saleor-config
+        - secretRef:
+            name: saleor-secrets
+
+---
+# Ingress for external access
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: saleor-ingress
+  namespace: saleor
+  annotations:
+    kubernetes.io/ingress.global-static-ip-name: "saleor-lb-ip-SUFFIX"
+    networking.gke.io/managed-certificates: "saleor-ssl-cert"
+    kubernetes.io/ingress.class: "gce"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+spec:
+  rules:
+  - host: DOMAIN_NAME
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: saleor-app-service
+            port:
+              number: 80
+
+---
+# Managed SSL Certificate
+apiVersion: networking.gke.io/v1
+kind: ManagedCertificate
+metadata:
+  name: saleor-ssl-cert
+  namespace: saleor
+spec:
+  domains:
+    - DOMAIN_NAME
+
+---
+# Horizontal Pod Autoscaler for main app
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: saleor-app-hpa
+  namespace: saleor
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: saleor-app
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80

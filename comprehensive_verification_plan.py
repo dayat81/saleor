@@ -5,7 +5,7 @@ Executes thorough testing of the deployed Saleor instance with detailed logging
 """
 
 import requests
-import json
+import json 
 import sys
 import subprocess
 import time

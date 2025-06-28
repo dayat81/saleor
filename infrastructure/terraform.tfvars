@@ -9,7 +9,7 @@ django_secret_key  = "demo-secret-key-change-in-production"
 db_password        = "secure-db-password-123"
 
 # Optional variables with demo values
-region             = "us-central1"
+region             = "asia-southeast2"
 environment        = "development"
 
 # Application configuration
@@ -21,15 +21,15 @@ email_url = "console://"
 
 # Database configuration
 db_tier      = "db-custom-1-3840"  # 1 vCPU, 3.75GB RAM (demo size)
-db_disk_size = 50                  # GB
+db_disk_size = 20                  # GB - minimal size for demo
 
 # Redis configuration
 redis_tier        = "BASIC"        # Basic tier for demo
 redis_memory_size = 1              # GB
 
 # Cloud Run configuration
-min_instances = 0    # Scale to zero for demo
-max_instances = 10   # Small scale for demo
+min_instances = 0    # Scale to zero for cost savings
+max_instances = 5    # Reasonable scale for demo
 
 # Demo settings
 enable_debug_features = true   # Enable for demo

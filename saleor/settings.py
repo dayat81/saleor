@@ -1062,8 +1062,12 @@ BREAKER_BOARD_DRY_RUN_SYNC_EVENTS = get_list(
     os.environ.get("BREAKER_BOARD_DRY_RUN_SYNC_EVENTS", "")
 )
 
-TELEMETRY_TRACER_CLASS = "saleor.core.telemetry.trace.Tracer"
-TELEMETRY_METER_CLASS = "saleor.core.telemetry.metric.Meter"
+TELEMETRY_TRACER_CLASS = os.environ.get(
+    "TELEMETRY_TRACER_CLASS", "saleor.core.telemetry.trace.Tracer"
+)
+TELEMETRY_METER_CLASS = os.environ.get(
+    "TELEMETRY_METER_CLASS", "saleor.core.telemetry.metric.Meter"
+)
 # Whether to raise or log exceptions for telemetry unit conversion errors
 # Disabled by default to prevent disruptions caused by unexpected unit conversion issues
 TELEMETRY_RAISE_UNIT_CONVERSION_ERRORS = False

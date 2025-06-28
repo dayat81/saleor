@@ -1,10 +1,10 @@
 # Saleor Google Cloud Infrastructure
 
-This directory contains Terraform configuration to deploy Saleor e-commerce platform on Google Cloud Platform using serverless architecture.
+This directory contains Terraform configuration to deploy Saleor e-commerce platform on Google Cloud Platform using Google Kubernetes Engine (GKE).
 
 ## Architecture Overview
 
-- **Application**: Cloud Run (serverless containers)
+- **Application**: Google Kubernetes Engine (GKE)
 - **Database**: Cloud SQL PostgreSQL
 - **Cache**: Cloud Memorystore Redis
 - **Storage**: Cloud Storage buckets
@@ -71,8 +71,12 @@ This directory contains Terraform configuration to deploy Saleor e-commerce plat
    docker build -t us-central1-docker.pkg.dev/YOUR_PROJECT_ID/saleor-SUFFIX/saleor:latest ..
    docker push us-central1-docker.pkg.dev/YOUR_PROJECT_ID/saleor-SUFFIX/saleor:latest
    
-   # Update Cloud Run service
-   gcloud run services update saleor-app-SUFFIX --region=us-central1
+   # Connect to GKE cluster
+   gcloud container clusters get-credentials saleor-gke-SUFFIX --region=us-central1 --project=YOUR_PROJECT_ID
+   
+   # Update Kubernetes manifests and deploy
+   ./update-k8s-manifests.sh
+   kubectl apply -f k8s-manifests-updated.yaml
    ```
 
 ## Configuration
@@ -95,9 +99,9 @@ db_password        = "your-secure-database-password"
 # Environment
 environment = "production"  # development, staging, production
 
-# Scaling
+# GKE Node Pool Scaling
 min_instances = 1
-max_instances = 100
+max_instances = 10
 
 # Database
 db_tier = "db-custom-2-8192"  # 2 vCPU, 8GB RAM
@@ -122,7 +126,7 @@ sendgrid_api_key = "your-sendgrid-key"                     # SendGrid
 terraform show
 
 # Get specific outputs
-terraform output cloud_run_service_url
+terraform output gke_cluster_name
 terraform output load_balancer_ip
 ```
 
@@ -139,11 +143,14 @@ terraform apply
 ```bash
 # Update variables in terraform.tfvars
 min_instances = 2
-max_instances = 200
+max_instances = 20
 db_tier = "db-custom-4-16384"
 
 # Apply changes
 terraform apply
+
+# Scale Kubernetes deployments
+kubectl scale deployment saleor-app --replicas=5 -n saleor
 ```
 
 ## Application Deployment
@@ -155,6 +162,10 @@ Use the included Cloud Build configuration:
 ```bash
 # Deploy via Cloud Build
 gcloud builds submit --config=../cloudbuild.yaml ..
+
+# Or deploy directly to GKE
+./update-k8s-manifests.sh
+kubectl apply -f k8s-manifests-updated.yaml
 ```
 
 ### Manual Deployment
@@ -166,11 +177,14 @@ docker build -t REGISTRY_URL/saleor:latest ..
 # 2. Push to registry
 docker push REGISTRY_URL/saleor:latest
 
-# 3. Update Cloud Run
-gcloud run services update SERVICE_NAME --region=REGION
+# 3. Connect to GKE cluster
+gcloud container clusters get-credentials CLUSTER_NAME --region=REGION
 
-# 4. Run migrations (if needed)
-gcloud run jobs execute migration-job --region=REGION --wait
+# 4. Deploy to Kubernetes
+kubectl apply -f k8s-manifests-updated.yaml
+
+# 5. Run migrations (if needed)
+kubectl create job --from=cronjob/saleor-migrate migrate-$(date +%s) -n saleor
 ```
 
 ### Database Management
@@ -179,11 +193,11 @@ gcloud run jobs execute migration-job --region=REGION --wait
 # Connect to database
 gcloud sql connect INSTANCE_NAME --user=saleor
 
-# Run migrations
-gcloud run jobs execute migration-job --region=us-central1 --wait
+# Run migrations via Kubernetes job
+kubectl create job --from=cronjob/saleor-migrate migrate-$(date +%s) -n saleor
 
-# Create superuser
-gcloud run jobs execute create-superuser-job --region=us-central1 --wait
+# Create superuser via Kubernetes job
+kubectl run create-superuser --image=REGISTRY_URL/saleor:latest --rm -it --restart=Never -- python manage.py createsuperuser
 ```
 
 ## Monitoring & Maintenance
@@ -192,19 +206,19 @@ gcloud run jobs execute create-superuser-job --region=us-central1 --wait
 
 - **Application**: `https://YOUR_DOMAIN/health/`
 - **GraphQL**: `https://YOUR_DOMAIN/graphql/`
-- **Cloud Run**: Available in Google Cloud Console
+- **Kubernetes**: `kubectl get pods -n saleor`
 
 ### Logs
 
 ```bash
-# Cloud Run logs
-gcloud logs read --project=PROJECT_ID --resource=cloud_run_revision
+# Kubernetes logs
+kubectl logs -f deployment/saleor-app -n saleor
 
 # Database logs
 gcloud logs read --project=PROJECT_ID --resource=cloudsql_database
 
 # Real-time monitoring
-gcloud logs tail --project=PROJECT_ID
+kubectl logs -f -l app=saleor-app -n saleor
 ```
 
 ### Monitoring URLs
@@ -212,7 +226,7 @@ gcloud logs tail --project=PROJECT_ID
 After deployment, access monitoring via:
 
 - **Cloud Console**: `terraform output monitoring_urls`
-- **Cloud Run Logs**: Available in outputs
+- **GKE Console**: Available in outputs
 - **Database Console**: Available in outputs
 - **Redis Console**: Available in outputs
 
@@ -222,18 +236,18 @@ After deployment, access monitoring via:
 
 ```hcl
 environment = "development"
-min_instances = 0          # Scale to zero
+min_instances = 1          # Minimum GKE nodes
 db_tier = "db-custom-1-3840"
 redis_tier = "BASIC"
 redis_memory_size = 1
-preemptible_workers = true
+preemptible_workers = true  # Use preemptible GKE nodes
 ```
 
 ### Production Environment
 
 ```hcl
 environment = "production"
-min_instances = 2          # Always warm
+min_instances = 3          # Multiple GKE nodes for HA
 db_tier = "db-custom-4-16384"
 redis_tier = "STANDARD_HA"
 redis_memory_size = 10
@@ -295,16 +309,17 @@ gcloud sql backups restore --restore-instance=INSTANCE_NAME \
 
 ### Common Issues
 
-1. **Cloud Run not starting**:
+1. **Pods not starting**:
    ```bash
-   gcloud run services describe saleor-app-SUFFIX --region=us-central1
-   gcloud logs read --resource=cloud_run_revision
+   kubectl describe pod -l app=saleor-app -n saleor
+   kubectl logs -l app=saleor-app -n saleor
    ```
 
 2. **Database connection issues**:
    ```bash
-   # Check VPC connector
-   gcloud compute networks vpc-access connectors describe CONNECTOR_NAME
+   # Check GKE cluster networking
+   kubectl get pods -n saleor
+   kubectl exec -it deployment/saleor-app -n saleor -- ping DB_HOST
 
    # Test database connectivity
    gcloud sql connect INSTANCE_NAME --user=saleor
@@ -384,10 +399,13 @@ terraform state show RESOURCE_NAME
 terraform refresh
 
 # Google Cloud resource inspection
-gcloud compute instances list
+gcloud container clusters list
 gcloud sql instances list
-gcloud run services list
 gcloud storage buckets list
+
+# Kubernetes resource inspection
+kubectl get all -n saleor
+kubectl get ingress -n saleor
 
 # Resource cleanup verification
 gcloud projects get-iam-policy PROJECT_ID
@@ -398,14 +416,17 @@ gcloud billing accounts projects describe PROJECT_ID
 
 ```
 infrastructure/
-├── main.tf                 # Main infrastructure resources
-├── variables.tf            # Input variable definitions
-├── outputs.tf              # Output value definitions
-├── versions.tf             # Provider version constraints
-├── terraform.tfvars.example # Example configuration
-├── terraform.tfvars        # Your configuration (not in git)
-├── terraform.tfstate       # Terraform state (not in git)
-└── README.md              # This file
+├── main.tf                    # Main infrastructure resources
+├── variables.tf               # Input variable definitions
+├── outputs.tf                 # Output value definitions
+├── versions.tf                # Provider version constraints
+├── terraform.tfvars.example   # Example configuration
+├── terraform.tfvars           # Your configuration (not in git)
+├── terraform.tfstate          # Terraform state (not in git)
+├── k8s-manifests.yaml         # Kubernetes deployment manifests
+├── update-k8s-manifests.sh    # Script to update manifests
+├── gke-deployment-log.md      # Deployment log
+└── README.md                  # This file
 ```
 
 ## Next Steps

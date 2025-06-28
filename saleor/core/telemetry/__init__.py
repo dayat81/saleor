@@ -32,27 +32,33 @@ def otel_configure_sdk():
 
 def initialize_telemetry() -> None:
     """Initialize telemetry components lazily to ensure fork safety in multi-process environments."""
-    otel_configure_sdk()
+    try:
+        otel_configure_sdk()
 
-    # To avoid importing Django before instrumenting libs
-    from django.conf import settings
+        # To avoid importing Django before instrumenting libs
+        from django.conf import settings
 
-    # To avoid circular imports.
-    from ... import __version__ as saleor_version
+        # To avoid circular imports.
+        from ... import __version__ as saleor_version
 
-    tracer_cls = load_object(settings.TELEMETRY_TRACER_CLASS)
-    if not issubclass(tracer_cls, Tracer):
-        raise ValueError(
-            "settings.TELEMETRY_TRACER_CLASS must point to a subclass of Tracer"
-        )
-    tracer.initialize(tracer_cls, saleor_version)
+        tracer_cls = load_object(settings.TELEMETRY_TRACER_CLASS)
+        if not issubclass(tracer_cls, Tracer):
+            raise ValueError(
+                "settings.TELEMETRY_TRACER_CLASS must point to a subclass of Tracer"
+            )
+        tracer.initialize(tracer_cls, saleor_version)
 
-    meter_cls = load_object(settings.TELEMETRY_METER_CLASS)
-    if not issubclass(meter_cls, Meter):
-        raise ValueError(
-            "settings.TELEMETRY_METER_CLASS must point to a subclass of Meter"
-        )
-    meter.initialize(meter_cls, saleor_version)
+        meter_cls = load_object(settings.TELEMETRY_METER_CLASS)
+        if not issubclass(meter_cls, Meter):
+            raise ValueError(
+                "settings.TELEMETRY_METER_CLASS must point to a subclass of Meter"
+            )
+        meter.initialize(meter_cls, saleor_version)
+    except Exception as e:
+        # Log the error but don't crash the application
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning(f"Failed to initialize telemetry: {e}")
 
 
 def get_task_context(link_attributes: Attributes = None) -> TelemetryTaskContext:

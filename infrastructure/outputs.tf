@@ -31,9 +31,19 @@ output "subnet_name" {
   value       = google_compute_subnetwork.subnet.name
 }
 
-output "vpc_connector_name" {
-  description = "Name of the VPC connector"
-  value       = google_vpc_access_connector.connector.name
+output "cloud_run_service_name" {
+  description = "Name of the Cloud Run service"
+  value       = google_cloud_run_v2_service.saleor_app.name
+}
+
+output "cloud_run_service_url" {
+  description = "URL of the Cloud Run service"
+  value       = google_cloud_run_v2_service.saleor_app.uri
+}
+
+output "cloud_run_job_name" {
+  description = "Name of the Cloud Run job"
+  value       = google_cloud_run_v2_job.saleor_worker.name
 }
 
 # Database outputs
@@ -124,22 +134,6 @@ output "container_image_url" {
 }
 
 # Cloud Run outputs
-output "cloud_run_service_name" {
-  description = "Name of the Cloud Run service"
-  value       = google_cloud_run_v2_service.saleor_app.name
-}
-
-output "cloud_run_service_url" {
-  description = "URL of the Cloud Run service"
-  value       = google_cloud_run_v2_service.saleor_app.uri
-}
-
-output "cloud_run_job_name" {
-  description = "Name of the Cloud Run job for workers"
-  value       = google_cloud_run_v2_job.saleor_worker.name
-}
-
-# Service Account outputs
 output "cloud_run_service_account_email" {
   description = "Email of the Cloud Run service account"
   value       = google_service_account.cloud_run_sa.email
@@ -148,6 +142,11 @@ output "cloud_run_service_account_email" {
 output "cloud_run_service_account_id" {
   description = "ID of the Cloud Run service account"
   value       = google_service_account.cloud_run_sa.account_id
+}
+
+output "vpc_connector_name" {
+  description = "Name of the VPC connector"
+  value       = google_vpc_access_connector.vpc_connector.name
 }
 
 # Load Balancer outputs
@@ -200,15 +199,15 @@ output "environment_variables" {
 output "deployment_commands" {
   description = "Commands to deploy the application"
   value = [
+    "# Configure Docker authentication:",
+    "gcloud auth configure-docker ${google_artifact_registry_repository.saleor_repo.location}-docker.pkg.dev",
+    "",
     "# Build and push Docker image:",
-    "docker build -t ${google_artifact_registry_repository.saleor_repo.location}-docker.pkg.dev/${var.project_id}/${google_artifact_registry_repository.saleor_repo.repository_id}/saleor:latest .",
+    "docker build -t ${google_artifact_registry_repository.saleor_repo.location}-docker.pkg.dev/${var.project_id}/${google_artifact_registry_repository.saleor_repo.repository_id}/saleor:latest ..",
     "docker push ${google_artifact_registry_repository.saleor_repo.location}-docker.pkg.dev/${var.project_id}/${google_artifact_registry_repository.saleor_repo.repository_id}/saleor:latest",
     "",
-    "# Update Cloud Run service:",
+    "# Deploy to Cloud Run:",
     "gcloud run services update ${google_cloud_run_v2_service.saleor_app.name} --region=${var.region}",
-    "",
-    "# Run database migrations:",
-    "gcloud run jobs execute migration-job --region=${var.region} --wait",
     "",
     "# Configure DNS to point to:",
     "IP: ${google_compute_global_address.lb_ip.address}"
@@ -219,9 +218,8 @@ output "deployment_commands" {
 output "health_check_urls" {
   description = "URLs for health checks"
   value = {
-    cloud_run_service = "${google_cloud_run_v2_service.saleor_app.uri}/health/"
-    load_balancer     = "https://${var.domain_name}/health/"
-    graphql_endpoint  = "https://${var.domain_name}/graphql/"
+    application      = "https://${var.domain_name}/health/"
+    graphql_endpoint = "https://${var.domain_name}/graphql/"
   }
 }
 
@@ -240,7 +238,7 @@ output "monitoring_urls" {
   description = "URLs for monitoring and logging"
   value = {
     cloud_console     = "https://console.cloud.google.com/home/dashboard?project=${var.project_id}"
-    cloud_run_logs    = "https://console.cloud.google.com/run/detail/${var.region}/${google_cloud_run_v2_service.saleor_app.name}/logs?project=${var.project_id}"
+    cloud_run_console = "https://console.cloud.google.com/run/detail/${var.region}/${google_cloud_run_v2_service.saleor_app.name}/overview?project=${var.project_id}"
     cloud_sql_console = "https://console.cloud.google.com/sql/instances/${google_sql_database_instance.postgres.name}/overview?project=${var.project_id}"
     redis_console     = "https://console.cloud.google.com/memorystore/redis/locations/${var.region}/instances/${google_redis_instance.redis.name}/overview?project=${var.project_id}"
     storage_console   = "https://console.cloud.google.com/storage/browser?project=${var.project_id}"
@@ -254,7 +252,7 @@ output "cost_monitoring" {
     billing_account_url = "https://console.cloud.google.com/billing?project=${var.project_id}"
     budget_alerts       = "Set up budget alerts in Google Cloud Console"
     cost_breakdown = {
-      cloud_run     = "Pay-per-request + CPU/Memory allocation"
+      gke_cluster   = "Per-node cost based on machine type"
       cloud_sql     = "Fixed cost based on tier: ${var.db_tier}"
       redis         = "Fixed cost based on memory: ${var.redis_memory_size}GB"
       storage       = "Pay-per-GB stored + operations"
