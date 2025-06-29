@@ -9,7 +9,7 @@ django_secret_key  = "demo-secret-key-change-in-production"
 db_password        = "secure-db-password-123"
 
 # Optional variables with demo values
-region             = "asia-southeast2"
+region             = "asia-southeast1"
 environment        = "development"
 
 # Application configuration
